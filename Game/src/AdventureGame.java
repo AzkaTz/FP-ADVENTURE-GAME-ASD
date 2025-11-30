@@ -20,8 +20,10 @@ import javax.swing.Timer;
  * - Persistent score records (~/.adventure_scores.ser)
  * - Dice animation + sound hooks
  * - Prime tiles highlighted (dark brown)
- * - Random points assigned to each tile (1..10) and awarded on landing (persist across match)
+ * - Random points assigned to each tile (1..10) and awarded on landing (tile points persist across match)
  * - Winner determined after ALL players finish. Score = points + stars*STAR_VALUE
+ *
+ * UI improvements: typography, spacing, grouped buttons, consistent sizes, clearer labels.
  *
  * Usage:
  *   javac AdventureGame.java
@@ -724,7 +726,6 @@ public class AdventureGame extends JFrame {
                     File soundFile = new File(filename);
                     if (!soundFile.exists()) {
                         // not fatal; just log
-                        // System.err.println("[Sound] File not found: " + filename);
                         addLog("[Sound] File not found: " + filename);
                         return;
                     }
@@ -855,12 +856,6 @@ public class AdventureGame extends JFrame {
      * - If usePrimePower == true and moving forward, player can auto-use ladder when passing/landing on ladder-from.
      * - If usePrimePower == false, ladders are ignored (log message shown).
      */
-    /**
-     * animateMovementWithAutoLadder:
-     * - Moves player step-by-step.
-     * - If usePrimePower == true and moving forward, player can auto-use ladder when passing/landing on ladder-from.
-     * - If usePrimePower == false, ladders are ignored (log message shown).
-     */
     private void animateMovementWithAutoLadder(int startPos, int moves, boolean isForward, boolean usePrimePower) {
         final int[] currentStep = {0};
         final int[] remaining = {moves};
@@ -888,6 +883,32 @@ public class AdventureGame extends JFrame {
                 playSound("move.wav");
 
                 currentPlayer.setPosition(next);
+                // === NEW: boss encounter on passing ===
+                // === NEW: Boss encounter on passing, must win or stop ===
+                if (bossNodes.contains(next)) {
+                    t.stop();
+
+                    int prevPos = currentPos[0]; // previous node before stepping
+                    final Player pRef = currentPlayer;
+
+                    triggerBossEncounter(next, pRef, success -> {
+                        if (!success) {
+                            // FAILED -> return to previous tile and STOP movement
+                            pRef.setPosition(prevPos);
+                            addLog("│ ❌ " + pRef.getName() + " failed to defeat the boss and cannot proceed.");
+                            gameBoard.repaint();
+                            updatePlayersInfoPanel();
+                            isAnimating = false;
+                            rollDiceButton.setEnabled(true);
+                            return;
+                        }
+
+                        // SUCCESS -> continue movement
+                        t.start();
+                    });
+                    return;
+                }
+
                 pathTaken.add(next);
                 gameBoard.setHighlightPath(new ArrayList<>(pathTaken));
                 gameBoard.repaint();
@@ -950,7 +971,6 @@ public class AdventureGame extends JFrame {
         t.start();
     }
 
-
     /**
      * Called when movement finished (after any teleport effects).
      * Handles:
@@ -975,15 +995,49 @@ public class AdventureGame extends JFrame {
         // Boss encounter check
         if (bossNodes.contains(landedPos)) {
             addLog("│ 👾 Boss is present at Node " + landedPos + " — triggering encounter.");
-            // capture locals into final variables so lambda can reference them
+
             final int _capLanded = landedPos;
             final boolean _capExtra = extraPending;
-            final Player _capPlayer = currentPlayer; // optional but safe to capture player as well
-            // Show boss dialog and when complete, proceed to finishTurn or next
-            triggerBossEncounter(_capLanded, _capPlayer, () -> finishTurnAfterLanding(_capLanded, _capExtra));
+            final Player _capPlayer = currentPlayer;
+
+            // Consumer<Boolean>: success = true/false
+            triggerBossEncounter(_capLanded, _capPlayer, success -> {
+
+                if (success) {
+                    // WIN → lanjut seperti biasa
+                    finishTurnAfterLanding(_capLanded, _capExtra);
+                } else {
+                    // FAIL → tidak boleh lanjut
+                    int prev = Math.max(1, _capLanded - 1);
+                    _capPlayer.setPosition(prev);
+
+                    addLog("│ ❌ " + _capPlayer.getName() +
+                            " failed the boss and is returned to Node " + prev + ". Turn ends.");
+
+                    gameBoard.repaint();
+                    updatePlayersInfoPanel();
+
+                    // lanjut ke pemain berikutnya
+                    playerQueue.add(_capPlayer);
+                    Player next = pollNextActivePlayer();
+                    currentPlayer = next;
+
+                    if (currentPlayer != null)
+                        currentPlayerLabel.setText("Turn: " + currentPlayer.getName());
+                    else
+                        currentPlayerLabel.setText("Waiting...");
+
+                    isAnimating = false;
+                    rollDiceButton.setEnabled(currentPlayer != null);
+
+                    addLog("Next: " + (currentPlayer != null ? currentPlayer.getName() : "—"));
+                    addLog("└─────────────────────");
+                }
+            });
         } else {
             finishTurnAfterLanding(landedPos, extraPending);
         }
+
     }
 
     /**
@@ -1108,7 +1162,7 @@ public class AdventureGame extends JFrame {
         return best;
     }
 
-    private void triggerBossEncounter(int node, Player player, Runnable onComplete) {
+    private void triggerBossEncounter(int node, Player player, java.util.function.Consumer<Boolean> callback) {
         addLog("│ 👾 Boss encountered at Node " + node + " — " + player.getName());
 
         int a = random.nextInt(12) + 1;
@@ -1119,7 +1173,7 @@ public class AdventureGame extends JFrame {
         switch (op) {
             case "+": correct = a + b; break;
             case "-": correct = a - b; break;
-            default: correct = a * b; break;
+            default:  correct = a * b; break;
         }
 
         String q = String.format("Solve to defeat the Boss: %d %s %d = ?", a, op, b);
@@ -1137,17 +1191,22 @@ public class AdventureGame extends JFrame {
         if (success) {
             addLog("│ ✅ " + player.getName() + " defeated the boss! +" + bossWinPoints + " pts, +" + bossWinStars + " stars");
             player.addScore(bossWinPoints);
-            for (int i=0;i<bossWinStars;i++) player.addStar();
+            for (int i = 0; i < bossWinStars; i++) player.addStar();
+
+            updatePlayersInfoPanel();
+            // Inform player, then notify caller with success = true
             JOptionPane.showMessageDialog(this, "You defeated the boss! You earn +" + bossWinPoints + " points and +" + bossWinStars + " stars.", "Victory", JOptionPane.INFORMATION_MESSAGE);
+            callback.accept(true);
         } else {
             addLog("│ ❌ " + player.getName() + " failed the boss challenge. " + bossLosePoints + " pts, " + bossLoseStars + " stars");
             player.addScore(bossLosePoints);
-            player.addStar(bossLoseStars);
-            JOptionPane.showMessageDialog(this, "You lost to the boss. Penalty: " + bossLosePoints + " points, " + bossLoseStars + " star(s).", "Defeat", JOptionPane.WARNING_MESSAGE);
-        }
+            player.addStar(bossLoseStars); // method clamps negative stars if implemented
 
-        updatePlayersInfoPanel();
-        onComplete.run();
+            updatePlayersInfoPanel();
+            // Inform player, then notify caller with success = false
+            JOptionPane.showMessageDialog(this, "You lost to the boss. Penalty: " + bossLosePoints + " points, " + bossLoseStars + " star(s).", "Defeat", JOptionPane.WARNING_MESSAGE);
+            callback.accept(false);
+        }
     }
 
     private void addLog(String message) {
@@ -1156,12 +1215,6 @@ public class AdventureGame extends JFrame {
     }
 
     // ---------- Ladders generation ----------
-    /**
-     * Generate non-overlapping ladders:
-     * - no shared start/end points,
-     * - no identical pairs,
-     * - no crossing segments (if from1 < from2 < to1 < to2 it's crossing).
-     */
     /**
      * Generate non-overlapping ladders with additional rule:
      * - no shared start/end points,
@@ -1503,3 +1556,4 @@ public class AdventureGame extends JFrame {
         });
     }
 }
+F
