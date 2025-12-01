@@ -1556,4 +1556,3 @@ public class AdventureGame extends JFrame {
         });
     }
 }
-F
