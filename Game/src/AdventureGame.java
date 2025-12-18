@@ -1250,44 +1250,149 @@ public class AdventureGame extends JFrame {
     private void triggerBossEncounter(int node, Player player, java.util.function.Consumer<Boolean> callback) {
         addLog("│ 👾 Boss encountered at Node " + node + " — " + player.getName());
 
-        int a = random.nextInt(12) + 1;
-        int b = random.nextInt(12) + 1;
-        String[] ops = {"+", "-", "*"};
-        String op = ops[random.nextInt(ops.length)];
-        int correct;
-        switch (op) {
-            case "+": correct = a + b; break;
-            case "-": correct = a - b; break;
-            default:  correct = a * b; break;
-        }
+        Random rnd = new Random();
 
-        String q = String.format("Solve to defeat the Boss: %d %s %d = ?", a, op, b);
-        String answer = JOptionPane.showInputDialog(this, q, "Boss Encounter", JOptionPane.QUESTION_MESSAGE);
-        boolean success = false;
-        if (answer != null) {
-            try {
-                int given = Integer.parseInt(answer.trim());
-                success = (given == correct);
-            } catch (NumberFormatException ex) {
-                success = false;
+        // ===============================
+        // 1. Generate SMP-level question
+        // ===============================
+        String question;
+        int correctAnswer;
+
+        int type = rnd.nextInt(5); // 0..4
+        switch (type) {
+
+            // 0️⃣ Pertambahan biasa
+            case 0: {
+                int a = rnd.nextInt(50) + 10;
+                int b = rnd.nextInt(50) + 10;
+                question = "Hitung: " + a + " + " + b;
+                correctAnswer = a + b;
+                break;
+            }
+
+            // 1️⃣ Perkalian
+            case 1: {
+                int a = rnd.nextInt(12) + 3;
+                int b = rnd.nextInt(12) + 3;
+                question = "Hitung: " + a + " × " + b;
+                correctAnswer = a * b;
+                break;
+            }
+
+            // 2️⃣ Logaritma dasar 2 atau 10 (aman)
+            case 2: {
+                int base = rnd.nextBoolean() ? 2 : 10;
+                int exp = rnd.nextInt(4) + 1;
+                int value = (int) Math.pow(base, exp);
+                question = "Hitung: log" + base + "(" + value + ")";
+                correctAnswer = exp;
+                break;
+            }
+
+            // 3️⃣ Segitiga (keliling)
+            case 3: {
+                int a = rnd.nextInt(6) + 3;
+                int b = rnd.nextInt(6) + 3;
+                int c = rnd.nextInt(6) + 3;
+                question = "Keliling segitiga dengan sisi " + a + ", " + b + ", " + c;
+                correctAnswer = a + b + c;
+                break;
+            }
+
+            // 4️⃣ Segitiga siku-siku (luas)
+            default: {
+                int alas = rnd.nextInt(8) + 4;
+                int tinggi = rnd.nextInt(8) + 4;
+                question = "Luas segitiga siku-siku (alas=" + alas + ", tinggi=" + tinggi + ")";
+                correctAnswer = (alas * tinggi) / 2;
+                break;
             }
         }
 
+
+        // ===============================
+        // 2. Dialog UI + Timer 10 detik
+        // ===============================
+        JTextField answerField = new JTextField();
+        JLabel timerLabel = new JLabel("Time left: 10", SwingConstants.CENTER);
+        timerLabel.setFont(new Font("SansSerif", Font.BOLD, 14));
+        timerLabel.setForeground(Color.RED);
+
+        JPanel panel = new JPanel(new GridLayout(0, 1, 6, 6));
+        panel.add(new JLabel("⚔ BOSS CHALLENGE ⚔", SwingConstants.CENTER));
+        panel.add(new JLabel(question, SwingConstants.CENTER));
+        panel.add(answerField);
+        panel.add(timerLabel);
+
+        JOptionPane optionPane = new JOptionPane(
+                panel,
+                JOptionPane.QUESTION_MESSAGE,
+                JOptionPane.OK_CANCEL_OPTION,
+                null,
+                new String[]{"Submit"},
+                "Submit"
+        );
+
+        JDialog dialog = optionPane.createDialog(this, "Boss Fight");
+        dialog.setModal(true);
+
+        final int[] timeLeft = {10};
+        Timer countdown = new Timer(1000, null);
+
+        countdown.addActionListener(e -> {
+            timeLeft[0]--;
+            timerLabel.setText("Time left: " + timeLeft[0]);
+
+            if (timeLeft[0] <= 0) {
+                countdown.stop();
+                optionPane.setValue(JOptionPane.CLOSED_OPTION);
+                dialog.dispose();
+            }
+        });
+
+        countdown.start();
+        dialog.setVisible(true);
+        countdown.stop();
+
+        // ===============================
+        // 3. Evaluate result
+        // ===============================
+        boolean success = false;
+        try {
+            int given = Integer.parseInt(answerField.getText().trim());
+            success = (given == correctAnswer && timeLeft[0] > 0);
+        } catch (Exception ignored) {
+            success = false;
+        }
+
+        // ===============================
+        // 4. Apply result
+        // ===============================
         if (success) {
             addLog("│ ✅ " + player.getName() + " defeated the boss! +" + bossWinPoints + " pts, +" + bossWinStars + " stars");
             player.addScore(bossWinPoints);
             for (int i = 0; i < bossWinStars; i++) player.addStar();
 
             updatePlayersInfoPanel();
-            JOptionPane.showMessageDialog(this, "You defeated the boss! You earn +" + bossWinPoints + " points and +" + bossWinStars + " stars.", "Victory", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Victory!\nCorrect Answer: " + correctAnswer,
+                    "Boss Defeated",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
             callback.accept(true);
         } else {
-            addLog("│ ❌ " + player.getName() + " failed the boss challenge. " + bossLosePoints + " pts, " + bossLoseStars + " stars");
+            addLog("│ ❌ " + player.getName() + " failed the boss challenge.");
             player.addScore(bossLosePoints);
             player.addStar(bossLoseStars);
 
             updatePlayersInfoPanel();
-            JOptionPane.showMessageDialog(this, "You lost to the boss. Penalty: " + bossLosePoints + " points, " + bossLoseStars + " star(s).", "Defeat", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Defeat!\nCorrect Answer: " + correctAnswer,
+                    "Boss Lost",
+                    JOptionPane.WARNING_MESSAGE
+            );
             callback.accept(false);
         }
     }
